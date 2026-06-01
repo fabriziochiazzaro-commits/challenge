@@ -645,7 +645,7 @@
       <small style="color:var(--text-dim)">La key se guarda solo en este navegador (localStorage)</small>
     </p>
     <div class="api-input-row">
-      <input type="password" id="api-key-input" placeholder="RGAPI-*********-****************************" />
+      <input type="password" id="api-key-input" placeholder="RGAPI-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
       <button onclick="saveApiKey()">Guardar</button>
     </div>
   </div>
@@ -775,7 +775,7 @@ function eloScore(tier, division, lp) {
 // ═══════════════════════════════════════════════════════
 //  API CALLS
 // ═══════════════════════════════════════════════════════
-let API_KEY = 'RGAPI-f16f6b49-f6a3-4a6b-8b82-2357e8bb8654';
+let API_KEY = '';
 
 async function riotFetch(url) {
   const res = await fetch(url, { headers: { 'X-Riot-Token': API_KEY } });
@@ -805,7 +805,7 @@ async function getRankedStatsByPuuid(puuid) {
   return riotFetch(`https://${CONFIG.region}.api.riotgames.com/lol/league/v4/entries/by-puuid/${puuid}`);
 }
 
-async function getMatchHistory(puuid, count = 20) {
+async function getMatchHistory(puuid, count = 10) {
   return riotFetch(`https://${CONFIG.regionalRoute}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?queue=420&start=0&count=${count}`);
 }
 
@@ -828,7 +828,7 @@ async function checkInGame(summonerId) {
 // ═══════════════════════════════════════════════════════
 async function computeStats(puuid, matches) {
   const results = [];
-  for (const mid of matches.slice(0, 15)) {
+  for (const mid of matches.slice(0, 7)) {
     try {
       const m = await getMatch(mid);
       const p = m.info.participants.find(x => x.puuid === puuid);
@@ -930,7 +930,7 @@ function renderExpandPanel(data) {
 function renderRow(data, rank) {
   const rankClass = rank === 1 ? 'top1' : rank === 2 ? 'top2' : rank === 3 ? 'top3' : '';
   const [igName, igTag] = data.player.account.split('#');
-  const opggUrl = `https://www.op.gg/summoners/las/${encodeURIComponent(igName)}-${encodeURIComponent(igTag || 'LAS')}/ingame`;
+  const opggUrl = `https://www.op.gg/summoners/las/${encodeURIComponent(igName)}-${encodeURIComponent(igTag || 'LAS')}/live-game`;
   const inGame = `<a href="${opggUrl}" target="_blank" style="text-decoration:none"><span class="in-game-badge"><span class="live-dot"></span>Live ↗</span></a>`;
   const tier = data.ranked?.tier || 'UNRANKED';
   const division = data.ranked?.rank || '';
@@ -970,6 +970,36 @@ function toggleExpand(rank) {
 }
 
 // ═══════════════════════════════════════════════════════
+//  RENDER TABLE (called progressively)
+// ═══════════════════════════════════════════════════════
+function renderTable(results) {
+  const loaded = results.filter(Boolean);
+  const sorted = [...loaded].sort((a,b) => {
+    const at = a.ranked?.tier; const ad = a.ranked?.rank; const alp = a.ranked?.leaguePoints || 0;
+    const bt = b.ranked?.tier; const bd = b.ranked?.rank; const blp = b.ranked?.leaguePoints || 0;
+    return eloScore(at,ad,alp) - eloScore(bt,bd,blp);
+  });
+
+  allData = sorted;
+  const list = document.getElementById('players-list');
+  list.innerHTML = sorted.map((d,i) => d.error
+    ? `<div class="error-row">⚠ ${d.player.group} (${d.player.account}): ${d.error}</div>`
+    : renderRow(d, i+1)
+  ).join('');
+
+  const ranked = sorted.filter(r => r.ranked);
+  const totalGames = ranked.reduce((s,r) => s + (r.ranked.wins + r.ranked.losses), 0);
+  const avgWR = ranked.length
+    ? Math.round(ranked.reduce((s,r) => s + r.ranked.wins/(r.ranked.wins+r.ranked.losses), 0) / ranked.length * 100)
+    : null;
+
+  document.getElementById('stat-players').textContent = CONFIG.players.length;
+  document.getElementById('stat-games').textContent = totalGames || '—';
+  document.getElementById('stat-winrate').textContent = avgWR !== null ? `${avgWR}%` : '—';
+  document.getElementById('stat-top').textContent = sorted[0] ? sorted[0].player.group : '—';
+}
+
+// ═══════════════════════════════════════════════════════
 //  LOAD ALL
 // ═══════════════════════════════════════════════════════
 let allData = [];
@@ -1000,20 +1030,20 @@ async function loadAll() {
 
   await initDDR();
 
-  const results = [];
-  for (const player of CONFIG.players) {
+  const results = new Array(CONFIG.players.length).fill(null);
+
+  async function loadPlayer(index) {
+    const player = CONFIG.players[index];
     const [gameName, tagLine] = player.account.split('#');
     const entry = { player, ranked: null, stats: null, inGame: false, error: null };
     try {
       const account = await getSummonerByRiotId(gameName, tagLine);
       const puuid = account.puuid;
-      // Try ranked by puuid first (newer endpoint, works with dev keys)
       try {
         const ranked = await getRankedStatsByPuuid(puuid);
         const soloQ = ranked.find(r => r.queueType === 'RANKED_SOLO_5x5');
         entry.ranked = soloQ || null;
       } catch(e) {
-        // Fallback: try via summoner id
         try {
           const summoner = await getSummonerByPuuid(puuid);
           if (summoner.id) {
@@ -1024,48 +1054,22 @@ async function loadAll() {
         } catch(e2) {}
       }
       try {
-        const matches = await getMatchHistory(puuid, 20);
+        const matches = await getMatchHistory(puuid, 10);
         entry.stats = await computeStats(puuid, matches);
       } catch(e) {}
     } catch(e) {
       entry.error = e.message;
     }
-    results.push(entry);
+    results[index] = entry;
+    renderTable(results);
   }
 
-  // Sort by ELO
-  results.sort((a,b) => {
-    const at = a.ranked?.tier; const ad = a.ranked?.rank; const alp = a.ranked?.leaguePoints || 0;
-    const bt = b.ranked?.tier; const bd = b.ranked?.rank; const blp = b.ranked?.leaguePoints || 0;
-    return eloScore(at,ad,alp) - eloScore(bt,bd,blp);
-  });
-
-  allData = results;
-
-  list.innerHTML = results.map((d,i) => d.error
-    ? `<div class="error-row">⚠ ${d.player.group} (${d.player.account}): ${d.error}</div>`
-    : renderRow(d, i+1)
-  ).join('');
-
-  // Update stats bar
-  const ranked = results.filter(r => r.ranked);
-  const totalGames = ranked.reduce((s,r) => s + (r.ranked.wins + r.ranked.losses), 0);
-  const avgWR = ranked.length
-    ? Math.round(ranked.reduce((s,r) => s + r.ranked.wins/(r.ranked.wins+r.ranked.losses), 0) / ranked.length * 100)
-    : null;
-  const leader = results[0];
-
-  document.getElementById('stat-players').textContent = results.length;
-  document.getElementById('stat-games').textContent = totalGames || '—';
-  document.getElementById('stat-winrate').textContent = avgWR !== null ? `${avgWR}%` : '—';
-  document.getElementById('stat-top').textContent = leader ? leader.player.group : '—';
-
-  // Timestamp
-  document.getElementById('last-updated-text').textContent =
-    'Actualizado: ' + new Date().toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'});
+  await Promise.all(CONFIG.players.map((_, i) => loadPlayer(i)));
 
   btn.classList.remove('loading');
   btn.textContent = '↺ Actualizar';
+  document.getElementById('last-updated-text').textContent =
+    'Actualizado: ' + new Date().toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'});
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1075,20 +1079,12 @@ function saveApiKey() {
   const val = document.getElementById('api-key-input').value.trim();
   if (!val.startsWith('RGAPI-')) { alert('La API Key debe empezar con RGAPI-'); return; }
   API_KEY = val;
-  localStorage.setItem('sqc_apikey', val);
   document.getElementById('api-setup').style.display = 'none';
   loadAll();
 }
 
 window.addEventListener('load', () => {
-  const saved = localStorage.getItem('sqc_apikey');
-  if (saved) {
-    API_KEY = saved;
-    document.getElementById('api-setup').style.display = 'none';
-    loadAll();
-  } else {
-    document.getElementById('api-setup').style.display = 'block';
-  }
+  document.getElementById('api-setup').style.display = 'block';
 });
 </script>
 </body>
