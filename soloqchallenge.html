@@ -930,7 +930,7 @@ function renderExpandPanel(data) {
 function renderRow(data, rank) {
   const rankClass = rank === 1 ? 'top1' : rank === 2 ? 'top2' : rank === 3 ? 'top3' : '';
   const [igName, igTag] = data.player.account.split('#');
-  const opggUrl = `https://www.op.gg/summoners/las/${encodeURIComponent(igName)}-${encodeURIComponent(igTag || 'LAS')}/live-game`;
+  const opggUrl = `https://www.op.gg/summoners/las/${encodeURIComponent(igName)}-${encodeURIComponent(igTag || 'LAS')}/ingame`;
   const inGame = `<a href="${opggUrl}" target="_blank" style="text-decoration:none"><span class="in-game-badge"><span class="live-dot"></span>Live ↗</span></a>`;
   const tier = data.ranked?.tier || 'UNRANKED';
   const division = data.ranked?.rank || '';
