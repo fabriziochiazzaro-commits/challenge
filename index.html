@@ -1055,7 +1055,7 @@ async function loadAll() {
         } catch(e2) {}
       }
       try {
-        const matches = await getMatchHistory(puuid, 10);
+        const matches = await getMatchHistory(puuid, 3);
         entry.stats = await computeStats(puuid, matches);
       } catch(e) {}
     } catch(e) {
